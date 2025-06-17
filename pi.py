@@ -1,66 +1,68 @@
-import requests
+import pickle
+
 import torch
-from PIL import Image
-from transformers import (
-    AutoConfig,
-    AutoProcessor,
-    GemmaForCausalLM,
-    PaliGemmaForConditionalGeneration,
-    PretrainedConfig,
-    PreTrainedModel,
+
+from pi0.new_modeling_pi0 import PI0Policy
+import numpy as np
+
+from cleandiffuser.env import libero
+import gym
+import robosuite.utils.transform_utils as T
+import matplotlib.pyplot as plt
+import json
+
+
+# policy = PI0Policy.from_pretrained("/home/dzb/pretrained/pi0", config=config)
+policy = PI0Policy.from_pretrained(
+    "/home/dzb/.cache/openpi/openpi-assets/checkpoints/pi0_libero_pytorch"
 )
-from transformers.models.auto import CONFIG_MAPPING
-from PIL import ImageDraw
-from copy import deepcopy
 
-model_id = "google/paligemma-3b-mix-224"
+norm_stats_path = "/home/dzb/.cache/openpi/openpi-assets/checkpoints/pi0_libero/assets/physical-intelligence/libero/norm_stats.json"
+with open(norm_stats_path) as f:
+    norm_stats = json.load(f)
 
-# url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/tasks/car.jpg?download=true"
-# image = Image.open(requests.get(url, stream=True).raw)
+state_max = np.array(norm_stats['norm_stats']['state']['q99'][:8], dtype=np.float32)
+state_min = np.array(norm_stats['norm_stats']['state']['q01'][:8], dtype=np.float32)
+action_max = np.array(norm_stats['norm_stats']['actions']['q99'][:7], dtype=np.float32)
+action_min = np.array(norm_stats['norm_stats']['actions']['q01'][:7], dtype=np.float32)
+state_mean = np.array(norm_stats['norm_stats']['state']['mean'][:8], dtype=np.float32)
+state_std = np.array(norm_stats['norm_stats']['state']['std'][:8], dtype=np.float32)
+action_mean = np.array(norm_stats['norm_stats']['actions']['mean'][:7], dtype=np.float32)
+action_std = np.array(norm_stats['norm_stats']['actions']['std'][:7], dtype=np.float32)
 
-device = "cuda:0"
-dtype = torch.bfloat16
+env = gym.make(
+    "libero-10-v0",  # from ["libero-goal-v0", "libero-object-v0", "libero-spatial-v0", "libero-10-v0", "libero-90-v0"],
+    task_id=2,  # task id from 0 to 9
+    image_size=224,  # image size (height, width)
+    camera_names=["agentview", "robot0_eye_in_hand"],  # camera names
+    seed=0  # random seed
+)
 
-model = PaliGemmaForConditionalGeneration.from_pretrained(
-    "/home/dzb/pretrained/paligemma3b",
-    torch_dtype=dtype,
-    device_map=device,
-    revision="bfloat16",
-).eval()
-processor = AutoProcessor.from_pretrained("/home/dzb/pretrained/paligemma3b")
+o = env.reset()
+dummy_action = np.array([0,0,0,0,0,0,-1])
+for _ in range(20):
+    o, r, d, i = env.step(dummy_action)
 
-image = Image.open("1.png").convert("RGB")
+unnorm_state = np.concatenate([
+    o['robot0_eef_pos'], T.quat2axisangle(o["robot0_eef_quat"]), o['robot0_gripper_qpos']
+], dtype=np.float32)
+# state = (state - state_min) / (state_max - state_min) * 2 - 1
+state = (unnorm_state - state_mean) / (state_std + 1e-6)
+base_0_rgb = o['agentview_image'][:,:,::-1].copy()
+left_wrist_0_rgb = o['robot0_eye_in_hand_image'][:,:,::-1].copy()
 
-prompt = "caption this image"
-model_inputs = processor(text=prompt, images=image, return_tensors="pt").to(model.device)
-input_len = model_inputs["input_ids"].shape[-1]
-
-with torch.inference_mode():
-    generation = model.generate(**model_inputs, max_new_tokens=100, do_sample=False)
-    generation = generation[0][input_len:]
-    decoded = processor.decode(generation, skip_special_tokens=True)
-    print(decoded)
-    
-    
-def draw_bounding_box(image: Image.Image, box: list[int], color: str = "red", width: int = 2) -> Image.Image:
-    """
-    Draw a bounding box on an image.
-
-    Args:
-        image (PIL.Image.Image): The image to draw on.
-        box (list[int]): The bounding box coordinates in the format [x_min, y_min, x_max, y_max].
-            It is a normalized bounding box, where coordinates are in the range int [0, 1024].
-        color (str): The color of the bounding box.
-        width (int): The width of the bounding box lines.
-
-    Returns:
-        PIL.Image.Image: The image with the bounding box drawn.
-    """
-    draw = ImageDraw.Draw(image)
-    y_min, x_min, y_max, x_max = box
-    x_min = int(x_min / 1024 * image.width)
-    y_min = int(y_min / 1024 * image.height)
-    x_max = int(x_max / 1024 * image.width)
-    y_max = int(y_max / 1024 * image.height)
-    draw.rectangle([x_min, y_min, x_max, y_max], outline=color, width=width)
-    return image
+observation = {
+    "image": {
+        "base_0_rgb": torch.from_numpy(base_0_rgb).to("cuda:0")[None],
+        "left_wrist_0_rgb": torch.from_numpy(left_wrist_0_rgb).to("cuda:0")[None],
+    },
+    "state": torch.from_numpy(state).to("cuda:0")[None],
+    "prompt": [env.task_description]
+}
+action = policy.select_action(observation)[0, :, :7]
+action = action.cpu().numpy()
+action = action * (action_std + 1e-6) + action_mean
+action[:, :6] += unnorm_state[None, :6]
+for i in range(40):
+    o, r, d, _ = env.step(action[i, :7])
+plt.imshow(o['agentview_image'][:,:,::-1].transpose(1,2,0)) 

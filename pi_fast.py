@@ -19,6 +19,7 @@ import json
 policy = PI0FASTPolicy.from_pretrained(
     "/home/dzb/.cache/openpi/openpi-assets/checkpoints/pi0_fast_libero_pytorch"
 )
+policy.model.action_dim= 7
 
 norm_stats_path = "/home/dzb/.cache/openpi/openpi-assets/checkpoints/pi0_fast_libero/assets/physical-intelligence/libero/norm_stats.json"
 with open(norm_stats_path) as f:
@@ -73,7 +74,7 @@ observation = {
 }
 # observation['prompt'] = example['prompt']
 
-action = policy.select_action(observation)[0]
+action = policy.select_action(observation)[0, :, :7]
 action = action.cpu().numpy()
 # action = (action + 1) / 2 * (action_max - action_min + 1e-6) + action_min
 action = action * (action_std + 1e-6) + action_mean

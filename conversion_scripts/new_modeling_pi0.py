@@ -1,12 +1,14 @@
+import math
+
 import einops
 import numpy as np
 import torch
 import torch.nn.functional as F
-from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from torch import Tensor, nn
 from transformers import AutoTokenizer
 
+from .configuration_pi0 import TorchPI0Config
 from .paligemma_with_expert import PaliGemmaWithExpertConfig, PaliGemmaWithExpertModel
 from .utils import (
     create_sinusoidal_pos_embedding,
@@ -25,12 +27,12 @@ IMAGE_KEYS = (
 class PI0Policy(PreTrainedPolicy):
     """Wrapper class around PI0FlowMatching model to train and run inference within LeRobot."""
 
-    config_class = PI0Config
+    config_class = TorchPI0Config
     name = "torch_pi0"
 
     def __init__(
         self,
-        config: PI0Config,
+        config: TorchPI0Config,
         tokenizer_path: str = "/home/dzb/pretrained/paligemma3b",
     ):
         """
@@ -46,7 +48,9 @@ class PI0Policy(PreTrainedPolicy):
         self.reset()
 
     def reset(self):
-        return None
+        """This should be called whenever the environment is reset."""
+        # self._action_queue = deque([], maxlen=self.config.n_action_steps)
+        pass
 
     def get_optim_params(self) -> dict:
         return self.parameters()
@@ -67,7 +71,6 @@ class PI0Policy(PreTrainedPolicy):
             "lang_tokens": float32 [*b, l],
             "lang_masks": float32 [*b, l],
         }
-        either provide `prompt` or (`lang_tokens`, `lang_masks`).
         """
         self.eval()
 
@@ -452,7 +455,10 @@ class PI0FlowMatching(nn.Module):
             fill_kv_cache=False,
         )
         suffix_out = suffix_out[:, -self.config.n_action_steps :]
+        # Original openpi code, upcast attention output
+        suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
+
         losses = F.mse_loss(u_t, v_t, reduction="none")
         return losses
 
@@ -495,7 +501,11 @@ class PI0FlowMatching(nn.Module):
             expanded_time = time.expand(bsize)
 
             v_t = self.predict_velocity(
-                state, prefix_pad_masks, past_key_values, x_t, expanded_time
+                state,  # (*b, state_dim)
+                prefix_pad_masks,  # (*b, l)
+                past_key_values,
+                x_t,  # (*b, ha, da)
+                expanded_time,  # (*b,)
             )
 
             # Euler step
@@ -504,7 +514,14 @@ class PI0FlowMatching(nn.Module):
 
         return x_t
 
-    def predict_velocity(self, state, prefix_pad_masks, past_key_values, x_t, timestep):
+    def predict_velocity(
+        self,
+        state,
+        prefix_pad_masks,
+        past_key_values,
+        x_t,
+        timestep,
+    ):
         """predict velocity at time t using the suffix model."""
         suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(
             state, x_t, timestep

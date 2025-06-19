@@ -53,16 +53,13 @@ import numpy as np
 import orbax.checkpoint as ocp
 import torch
 from jax.sharding import SingleDeviceSharding
-
-from pi0.modeling_pi0 import PI0Policy
-from pi0.modeling_pi0fast import PI0FASTPolicy
 from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.common.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
 
-from conversion_scripts.conversion_utils import (
-    get_gemma_config,
-    get_paligemma_config,
-)
+from pi0.modeling_pi0 import PI0Policy
+from pi0.modeling_pi0fast import PI0FASTPolicy
+
+from conversion_scripts.conversion_utils import get_gemma_config, get_paligemma_config
 
 PRECISIONS = {
     "bfloat16": torch.bfloat16,
@@ -393,15 +390,13 @@ def convert_pi0_checkpoint(
         )
     else:
         raise ValueError()
-    
+
     pi0_config.device = "cuda:1"
 
     # gemma_config=gemma_config, paligemma_config=paligemma_config)
     pi0_model = PI0FASTPolicy(pi0_config)
 
-    paligemma_params = update_keys_with_prefix(
-        paligemma_params, "model.pi0_"
-    )
+    paligemma_params = update_keys_with_prefix(paligemma_params, "model.pi0_")
     # gemma_params = update_keys_with_prefix(gemma_params, "model.paligemma_with_expert.")
     # projection_params = update_keys_with_prefix(projection_params, "model.")
 

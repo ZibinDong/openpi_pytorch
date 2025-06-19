@@ -29,14 +29,6 @@ PRECISION = {
 }
 
 
-def normalize(x, min_val, max_val):
-    return (x - min_val) / (max_val - min_val)
-
-
-def unnormalize(x, min_val, max_val):
-    return x * (max_val - min_val) + min_val
-
-
 def safe_arcsin(value):
     # This ensures that the input stays within
     # [−1,1] to avoid invalid values for arcsin
@@ -47,7 +39,7 @@ class PI0FASTPolicy(PreTrainedPolicy):
     """Wrapper class around PI0FAST tokenizer and model to train and run inference within LeRobot."""
 
     config_class = PI0FASTConfig
-    name = "pi0fast"
+    name = "torch_pi0fast"
 
     def __init__(
         self,
@@ -69,14 +61,13 @@ class PI0FASTPolicy(PreTrainedPolicy):
         self.reset()
 
     def reset(self):
-        """This should be called whenever the environment is reset."""
-        pass
+        return None
 
     def get_optim_params(self) -> dict:
         return self.parameters()
 
     @torch.no_grad
-    def select_action(self, batch: dict[str, Tensor]) -> Tensor:
+    def select_action(self, observation: dict[str, Tensor]) -> Tensor:
         """
         Observation: {
             "image": {
@@ -92,8 +83,7 @@ class PI0FASTPolicy(PreTrainedPolicy):
         """
         self.eval()
 
-        actions = self.model.generate_actions(batch)
-
+        actions = self.model.generate_actions(observation)
         return actions
 
     def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
@@ -295,6 +285,7 @@ class PI0FAST(nn.Module):
         self.action_dim = self.config.max_action_dim
         precision = config.precision
         torch_precision = PRECISION.get(precision, torch.float32)
+
         self.pad_token_id = (
             self.paligemma_tokenizer.pad_token_id
             if hasattr(self.paligemma_tokenizer, "pad_token_id")
@@ -434,22 +425,21 @@ class PI0FAST(nn.Module):
         token_type_ids = suffix_mask
         return token_type_ids
 
-    # ! state must in [-1, 1]
     def create_input_tokens(self, state, lang_text, actions=None):
         bsize = state.shape[0]
         device = state.device
+
         bins = torch.linspace(-1, 1, 256 + 1, device=device)[:-1]
         discretized = torch.bucketize(state, bins) - 1
-        discretized = discretized[:, :32]
+        # discretized = discretized[:, :32]
 
         prefix_texts = []
-        state_text = []
         for txt, disc in zip(lang_text, discretized, strict=False):
             cleaned = txt.lower().strip().replace("_", " ")
             state_str = " ".join(str(val.item()) for val in disc)
             prefix_texts.append(f"Task: {cleaned}, State: {state_str};\n")
-            state_text.append(f"State: {state_str};\n")
 
+        # tokenizer automatically adds <bos> token
         prefix_out = self.paligemma_tokenizer(
             prefix_texts,
             add_special_tokens=True,
@@ -502,6 +492,7 @@ class PI0FAST(nn.Module):
                 bsize, self.pad_token_id, dtype=torch.long, device=device
             )
             act_mask = torch.empty(bsize, 0, dtype=torch.long, device=device)
+
         final_ids = torch.cat([prefix_ids, act_ids], dim=1)
 
         final_mask = torch.cat([prefix_mask, act_mask], dim=1)
@@ -772,12 +763,15 @@ class PI0FAST(nn.Module):
         )
 
     def generate_actions(self, batch: dict[str, Tensor]):
-        # TODO: keep like this or move to the policy .forward
+        # normalze, resize, pad, and stack images
         images, img_masks = self.prepare_images(batch)
 
+        # create input tokens from state and prompt
         padded_outs = self.create_input_tokens(
             state=batch["state"], lang_text=batch["prompt"], actions=None
         )
+
+        # embed inputs
         tokens = padded_outs["input_ids"]
         pad_mask = padded_outs["padded_mask"]
         ar_mask = padded_outs["attention_mask"]
@@ -795,6 +789,8 @@ class PI0FAST(nn.Module):
                 padding_side="left",
             )
         )
+
+        # generate actions
         token_type_ids = token_type_ids.to(dtype=torch.int64)
         prefix_position_ids = torch.cumsum(pad_masks, dim=1) - 1
         output_tokens = self.pi0_paligemma.generate(
@@ -809,6 +805,8 @@ class PI0FAST(nn.Module):
             num_beams=1,
             token_type_ids=token_type_ids,
         )
+
+        # decode actions from output tokens
         actions = self.extract_actions(
             output_tokens, self.action_horizon, self.action_dim
         )
@@ -867,7 +865,7 @@ class PI0FAST(nn.Module):
         )
 
         pad_masks[:, :num_img_embs] = img_masks
-        pad_masks[:, num_img_embs:] = pad_mask  # ! lang&state tokens are left padded
+        pad_masks[:, num_img_embs:] = pad_mask
         att_masks[:, num_img_embs:] = ar_mask
         loss_masks[:, :num_img_embs] = img_loss_mask
         loss_masks[:, num_img_embs:] = loss_mask

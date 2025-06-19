@@ -1,0 +1,5 @@
+# Simplified LeRobot's Pytorch PI0 & PI0-fast Implementation
+
+[The LeRobot team](https://github.com/huggingface/lerobot/tree/main) has made a substantial contribution to the community through their diligent efforts in converting the PI0 and PI0-fast VLA models to PyTorch. This was an impressive undertaking. However, the original release included only limited usage instructions and examples, making it challenging for users to get the models running correctly by simply following the provided guidance.
+
+This repository addresses those issues by introducing numerous fixes and removing redundant code and functionalities. Furthermore, it now includes comprehensive usage documentation, enabling users to seamlessly deploy official [OpenPI](https://github.com/Physical-Intelligence/openpi/tree/main?tab=readme-ov-file) checkpoints and fine-tune their own models with ease.

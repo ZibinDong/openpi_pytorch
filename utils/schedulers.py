@@ -1,139 +1,55 @@
-#!/usr/bin/env python
-
-# Copyright 2024 The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-import abc
 import math
-from dataclasses import dataclass
-from pathlib import Path
-
-import draccus
-from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LambdaLR, LRScheduler
-
-from .utils import deserialize_json_into_object, write_json
-
-SCHEDULER_STATE = "scheduler_state.json"
 
 
-@dataclass
-class LRSchedulerConfig(draccus.ChoiceRegistry, abc.ABC):
-    num_warmup_steps: int
+class CosineDecaySchedule:
+    """
+    Implements a learning rate schedule with a linear warmup followed by a cosine decay.
 
-    @property
-    def type(self) -> str:
-        return self.get_choice_name(self.__class__)
+    Args:
+        warmup_steps (int): The number of steps for the linear warmup phase.
+        peak_lr (float): The learning rate at the end of the warmup phase and the start of decay.
+        decay_steps (int): The total number of steps over which the cosine decay occurs.
+                           This typically includes the warmup steps if decay starts after warmup.
+        decay_lr (float): The minimum learning rate at the end of the cosine decay.
+                          If not specified, it defaults to 0.0.
+    """
 
-    @abc.abstractmethod
-    def build(
-        self, optimizer: Optimizer, num_training_steps: int
-    ) -> LRScheduler | None:
-        raise NotImplementedError
+    def __init__(
+        self, warmup_steps: int, peak_lr: float, decay_steps: int, decay_lr: float = 0.0
+    ):
+        if warmup_steps >= decay_steps:
+            raise ValueError("warmup_steps must be less than decay_steps")
+        if not (0 <= decay_lr <= peak_lr):
+            raise ValueError("decay_lr must be between 0 and peak_lr")
 
+        self.warmup_steps = warmup_steps
+        self.peak_lr = peak_lr
+        self.decay_steps = decay_steps
+        self.decay_lr = decay_lr
+        self.total_decay_range = (
+            peak_lr - decay_lr
+        )  # The range over which LR actually decays
 
-# @LRSchedulerConfig.register_subclass("diffuser")
-# @dataclass
-# class DiffuserSchedulerConfig(LRSchedulerConfig):
-#     name: str = "cosine"
-#     num_warmup_steps: int | None = None
+    def __call__(self, current_step: int) -> float:
+        if current_step < self.warmup_steps:
+            # Linear Warmup Phase
+            # Learning rate increases linearly from 0 to peak_lr
+            return self.peak_lr * (current_step / self.warmup_steps)
+        elif current_step < self.decay_steps:
+            # Cosine Decay Phase
+            # Calculate the progress within the decay period (after warmup)
+            # The cosine decay starts from peak_lr and goes down to decay_lr
+            progress = (current_step - self.warmup_steps) / (
+                self.decay_steps - self.warmup_steps
+            )
 
-#     def build(self, optimizer: Optimizer, num_training_steps: int) -> LambdaLR:
-#         from diffusers.optimization import get_scheduler
+            # Cosine annealing formula: 0.5 * (1 + cos(pi * progress))
+            # This scales from 1.0 down to 0.0
+            cosine_factor = 0.5 * (1 + math.cos(math.pi * progress))
 
-#         kwargs = {
-#             **asdict(self),
-#             "num_training_steps": num_training_steps,
-#             "optimizer": optimizer,
-#         }
-#         return get_scheduler(**kwargs)
-
-
-@LRSchedulerConfig.register_subclass("vqbet")
-@dataclass
-class VQBeTSchedulerConfig(LRSchedulerConfig):
-    num_warmup_steps: int
-    num_vqvae_training_steps: int
-    num_cycles: float = 0.5
-
-    def build(self, optimizer: Optimizer, num_training_steps: int) -> LambdaLR:
-        def lr_lambda(current_step):
-            if current_step < self.num_vqvae_training_steps:
-                return float(1)
-            else:
-                adjusted_step = current_step - self.num_vqvae_training_steps
-                if adjusted_step < self.num_warmup_steps:
-                    return float(adjusted_step) / float(max(1, self.num_warmup_steps))
-                progress = float(adjusted_step - self.num_warmup_steps) / float(
-                    max(1, num_training_steps - self.num_warmup_steps)
-                )
-                return max(
-                    0.0,
-                    0.5
-                    * (
-                        1.0
-                        + math.cos(math.pi * float(self.num_cycles) * 2.0 * progress)
-                    ),
-                )
-
-        return LambdaLR(optimizer, lr_lambda, -1)
-
-
-@LRSchedulerConfig.register_subclass("cosine_decay_with_warmup")
-@dataclass
-class CosineDecayWithWarmupSchedulerConfig(LRSchedulerConfig):
-    """Used by Physical Intelligence to train Pi0"""
-
-    num_warmup_steps: int
-    num_decay_steps: int
-    peak_lr: float
-    decay_lr: float
-
-    def build(self, optimizer: Optimizer, num_training_steps: int) -> LambdaLR:
-        del num_training_steps
-
-        def lr_lambda(current_step):
-            def linear_warmup_schedule(current_step):
-                if current_step <= 0:
-                    return 1 / (self.num_warmup_steps + 1)
-                frac = 1 - current_step / self.num_warmup_steps
-                return (1 / (self.num_warmup_steps + 1) - 1) * frac + 1
-
-            def cosine_decay_schedule(current_step):
-                step = min(current_step, self.num_decay_steps)
-                cosine_decay = 0.5 * (
-                    1 + math.cos(math.pi * step / self.num_decay_steps)
-                )
-                alpha = self.decay_lr / self.peak_lr
-                decayed = (1 - alpha) * cosine_decay + alpha
-                return decayed
-
-            if current_step < self.num_warmup_steps:
-                return linear_warmup_schedule(current_step)
-
-            return cosine_decay_schedule(current_step)
-
-        return LambdaLR(optimizer, lr_lambda, -1)
-
-
-def save_scheduler_state(scheduler: LRScheduler, save_dir: Path) -> None:
-    state_dict = scheduler.state_dict()
-    write_json(state_dict, save_dir / SCHEDULER_STATE)
-
-
-def load_scheduler_state(scheduler: LRScheduler, save_dir: Path) -> LRScheduler:
-    state_dict = deserialize_json_into_object(
-        save_dir / SCHEDULER_STATE, scheduler.state_dict()
-    )
-    scheduler.load_state_dict(state_dict)
-    return scheduler
+            # Scale the cosine factor by the total_decay_range and add decay_lr
+            # to ensure it decays from peak_lr to decay_lr
+            return self.decay_lr + self.total_decay_range * cosine_factor
+        else:
+            # After decay_steps, learning rate stays at decay_lr
+            return self.decay_lr

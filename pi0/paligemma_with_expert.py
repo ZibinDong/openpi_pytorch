@@ -156,7 +156,7 @@ class PaliGemmaWithExpertModel(PreTrainedModel):
 
         self.attention_interface = self.get_attention_interface()
 
-        self.to_bfloat16_like_physical_intelligence()
+        # self.to_bfloat16_like_physical_intelligence()
         self.set_requires_grad()
 
     def set_requires_grad(self):

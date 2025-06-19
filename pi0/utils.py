@@ -1,11 +1,32 @@
 import math
 
 import einops
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from xformers.ops import memory_efficient_attention
+
+# from xformers.ops import memory_efficient_attention
+
+
+def find_next_divisible_by_8_numpy(n: np.ndarray) -> np.ndarray:
+    """
+    Finds the smallest integers greater than each element in a NumPy array 'n'
+    that are divisible by 8. Assumes non-negative integers.
+
+    Args:
+        n: A NumPy array of integers.
+
+    Returns:
+        A NumPy array containing the smallest integers greater than each input element
+        that are divisible by 8.
+    """
+    remainder = n % 8
+    # Calculate the amount to add: 0 if already divisible, otherwise 8 - remainder
+    # np.where is efficient for conditional operations on arrays
+    amount_to_add = np.where(remainder == 0, 8, 8 - remainder)
+    return n + amount_to_add
 
 
 def create_sinusoidal_pos_embedding(
@@ -150,38 +171,43 @@ def eager_attention_forward(
     return att_output
 
 
-def xformer_attention_forward(query_states, key_states, value_states, attention_mask):
-    bsize, seq_len, num_att_heads, head_dim = query_states.shape
-    num_key_value_heads = key_states.shape[2]
-    num_key_value_groups = num_att_heads // num_key_value_heads
+# def xformer_attention_forward(query_states, key_states, value_states, attention_mask):
+#     bsize, seq_len, num_att_heads, head_dim = query_states.shape
+#     num_key_value_heads = key_states.shape[2]
+#     num_key_value_groups = num_att_heads // num_key_value_heads
 
-    query_states = einops.rearrange(
-        query_states, "b l (h g) d -> b l h g d", g=num_key_value_groups
-    )
-    key_states = einops.repeat(
-        key_states, "b l h d -> b l h g d", g=num_key_value_groups
-    )
-    value_states = einops.repeat(
-        value_states, "b l h d -> b l h g d", g=num_key_value_groups
-    )
-    attention_mask = einops.repeat(
-        attention_mask,
-        "b l s -> b h g l s",
-        h=num_key_value_heads,
-        g=num_key_value_groups,
-    )
+#     query_states = einops.rearrange(
+#         query_states, "b l (h g) d -> b l h g d", g=num_key_value_groups
+#     )
+#     key_states = einops.repeat(
+#         key_states, "b l h d -> b l h g d", g=num_key_value_groups
+#     )
+#     value_states = einops.repeat(
+#         value_states, "b l h d -> b l h g d", g=num_key_value_groups
+#     )
+#     aligned_attention_mask = torch.zeros(
+#         (bsize, seq_len, find_next_divisible_by_8_numpy(seq_len).item()),
+#         dtype=query_states.dtype,
+#         device=attention_mask.device,
+#     )
+#     big_neg = -2.3819763e38
+#     aligned_attention_mask[:, :, :seq_len] = ~attention_mask * big_neg
+#     aligned_attention_mask = einops.repeat(
+#         aligned_attention_mask,
+#         "b l s -> b h g l s",
+#         h=num_key_value_heads,
+#         g=num_key_value_groups,
+#     )[:, :, :, :, :seq_len]
 
-    big_neg = -2.3819763e38
+#     att_output = memory_efficient_attention(
+#         query=query_states,
+#         key=key_states,
+#         value=value_states,
+#         attn_bias=aligned_attention_mask,
+#     )
+#     att_output = att_output.reshape(bsize, seq_len, -1)
 
-    att_output = memory_efficient_attention(
-        query=query_states,
-        key=key_states,
-        value=value_states,
-        attn_bias=~attention_mask * big_neg,
-    )
-    att_output = att_output.reshape(bsize, seq_len, -1)
-
-    return att_output
+#     return att_output
 
 
 @torch.jit.script

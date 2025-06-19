@@ -53,14 +53,13 @@ import numpy as np
 import orbax.checkpoint as ocp
 import torch
 from jax.sharding import SingleDeviceSharding
-
-from pi0.modeling_pi0 import PI0Policy
 from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
 
 from conversion_scripts.conversion_utils import (
     get_gemma_config,
     get_paligemma_config,
 )
+from pi0.modeling_pi0 import PI0Policy
 
 PRECISIONS = {
     "bfloat16": torch.bfloat16,
@@ -142,7 +141,6 @@ def slice_paligemma_state_dict(state_dict, config):
 
     llm_mlp_gating_einsum = state_dict.pop(f"llm/layers/mlp/gating_einsum{suffix}")
     llm_mlp_linear = state_dict.pop(f"llm/layers/mlp/linear{suffix}")
-    # TODO verify correctness of layer norm loading
 
     llm_input_layernorm = state_dict.pop(f"llm/layers/pre_attention_norm/scale{suffix}")
     llm_post_attention_layernorm = state_dict.pop(f"llm/layers/pre_ffw_norm/scale{suffix}")
@@ -217,7 +215,6 @@ def slice_gemma_state_dict(state_dict, config, num_expert=1):
 
     llm_mlp_gating_einsum = state_dict.pop(f"llm/layers/mlp_{num_expert}/gating_einsum{suffix}")
     llm_mlp_linear = state_dict.pop(f"llm/layers/mlp_{num_expert}/linear{suffix}")
-    # TODO verify correctness of layer norm loading
 
     llm_input_layernorm = state_dict.pop(f"llm/layers/pre_attention_norm_{num_expert}/scale{suffix}")
     llm_post_attention_layernorm = state_dict.pop(f"llm/layers/pre_ffw_norm_{num_expert}/scale{suffix}")
@@ -324,7 +321,11 @@ def update_keys_with_prefix(d: dict, prefix: str) -> dict:
 
 
 def convert_pi0_checkpoint(
-    checkpoint_dir: str, precision: str, tokenizer_id: str, output_path: str
+    checkpoint_dir: str,
+    precision: str,
+    tokenizer_id: str,
+    output_path: str,
+    torch_device: str,
 ):
     # Break down orbax ckpts - they are in OCDBT
     initial_params = slice_initial_orbax_checkpoint(checkpoint_dir=checkpoint_dir)
@@ -387,8 +388,8 @@ def convert_pi0_checkpoint(
         )
     else:
         raise ValueError()
-    
-    pi0_config.device = "cuda:1"
+
+    pi0_config.device = torch_device
 
     # gemma_config=gemma_config, paligemma_config=paligemma_config)
     pi0_model = PI0Policy(pi0_config)
@@ -445,10 +446,18 @@ if __name__ == "__main__":
         help="Path to save converted weights to",
     )
 
+    parser.add_argument(
+        "--torch_device",
+        default="cuda:0",
+        type=str,
+        help="Torch device to use for conversion",
+    )
+
     args = parser.parse_args()
     convert_pi0_checkpoint(
         checkpoint_dir=args.checkpoint_dir,
         precision=args.precision,
         tokenizer_id=args.tokenizer_hub_id,
         output_path=args.output_path,
+        torch_device=args.torch_device,
     )

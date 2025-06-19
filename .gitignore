@@ -3,4 +3,7 @@
 *.mp4
 *.txt
 *.jpg
+lightning_logs/
+
+
 __pycache__/

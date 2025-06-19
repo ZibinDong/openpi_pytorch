@@ -2,5 +2,5 @@
 *.png
 *.mp4
 *.txt
-
+*.jpg
 __pycache__/

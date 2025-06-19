@@ -1,8 +1,11 @@
 import math
 
+import einops
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from xformers.ops import memory_efficient_attention
 
 
 def create_sinusoidal_pos_embedding(
@@ -90,3 +93,125 @@ def resize_with_pad(img, width, height, pad_value=-1):
     # pad on left and top of image
     padded_img = F.pad(resized_img, (pad_width, 0, pad_height, 0), value=pad_value)
     return padded_img
+
+
+def eager_attention_forward(
+    query_states: torch.Tensor,
+    key_states: torch.Tensor,
+    value_states: torch.Tensor,
+    attention_mask: torch.Tensor,
+):
+    """
+    Performs eager attention, optimized with torch.einsum.
+
+    Args:
+        query_states: Query tensor of shape [batch_size, seq_len, num_attention_heads, head_dim].
+        key_states: Key tensor of shape [batch_size, seq_len, num_key_value_heads, head_dim].
+        value_states: Value tensor of shape [batch_size, seq_len, num_key_value_heads, head_dim].
+        attention_mask: Attention mask tensor, typically [batch_size, 1, seq_len, seq_len] or [batch_size, seq_len, seq_len].
+
+    Returns:
+        Output tensor of shape [batch_size, seq_len, num_attention_heads * head_dim].
+    """
+    bsize, seq_len, num_att_heads, head_dim = query_states.shape
+    num_key_value_heads = key_states.shape[2]
+    num_key_value_groups = num_att_heads // num_key_value_heads
+
+    key_states = einops.repeat(
+        key_states, "b l h d -> b l (h g) d", g=num_key_value_groups
+    )
+    value_states = einops.repeat(
+        value_states, "b l h d -> b l (h g) d", g=num_key_value_groups
+    )
+
+    query_states_permuted = torch.einsum("blhd->bhld", query_states)
+    key_states_permuted = torch.einsum("blhd->bhld", key_states)
+
+    att_weights = torch.einsum(
+        "bhqd,bhkd->bhqk", query_states_permuted, key_states_permuted
+    )
+    att_weights *= head_dim**-0.5
+
+    big_neg = -2.3819763e38
+    masked_att_weights = torch.where(
+        attention_mask[:, None, :, :], att_weights, big_neg
+    )
+
+    probs = nn.functional.softmax(masked_att_weights, dim=-1)
+    probs = probs.to(dtype=value_states.dtype)
+
+    value_states_permuted = torch.einsum("blhd->bhld", value_states)  # [B, H, L_v, D]
+    att_output = torch.einsum(
+        "bhqk,bhkv->bhqv", probs, value_states_permuted
+    )  # [B, H, L_q, D]
+    att_output = torch.einsum("bhld->blhd", att_output)  # [B, L, H, D]
+    att_output = att_output.reshape(bsize, seq_len, num_att_heads * head_dim)
+
+    return att_output
+
+
+def xformer_attention_forward(query_states, key_states, value_states, attention_mask):
+    bsize, seq_len, num_att_heads, head_dim = query_states.shape
+    num_key_value_heads = key_states.shape[2]
+    num_key_value_groups = num_att_heads // num_key_value_heads
+
+    query_states = einops.rearrange(
+        query_states, "b l (h g) d -> b l h g d", g=num_key_value_groups
+    )
+    key_states = einops.repeat(
+        key_states, "b l h d -> b l h g d", g=num_key_value_groups
+    )
+    value_states = einops.repeat(
+        value_states, "b l h d -> b l h g d", g=num_key_value_groups
+    )
+    attention_mask = einops.repeat(
+        attention_mask,
+        "b l s -> b h g l s",
+        h=num_key_value_heads,
+        g=num_key_value_groups,
+    )
+
+    big_neg = -2.3819763e38
+
+    att_output = memory_efficient_attention(
+        query=query_states,
+        key=key_states,
+        value=value_states,
+        attn_bias=~attention_mask * big_neg,
+    )
+    att_output = att_output.reshape(bsize, seq_len, -1)
+
+    return att_output
+
+
+@torch.jit.script
+def apply_rope(
+    x: torch.Tensor,
+    positions: torch.Tensor,
+    max_wavelength: float = 10_000.0,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Applies RoPE positions [B, L] to x [B, L, H, D]."""
+    original_dtype = x.dtype
+    d = x.shape[-1]
+    d_half = d // 2
+    device = x.device
+
+    # Cast input to compute_dtype for all internal operations
+    x_casted = x.to(dtype)
+    positions_casted = positions.to(dtype)
+
+    freq_exponents = (2.0 / d) * torch.arange(d_half, dtype=dtype, device=device)
+    timescale = max_wavelength**freq_exponents
+    radians = torch.einsum("bl,h->blh", positions_casted, 1.0 / timescale)
+
+    radians = radians[..., None, :]  # [B, L, 1, D_half]
+
+    sin = torch.sin(radians)
+    cos = torch.cos(radians)
+
+    x1, x2 = x_casted.split(d_half, dim=-1)
+
+    res = torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
+
+    return res.to(original_dtype)

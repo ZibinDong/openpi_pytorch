@@ -105,7 +105,7 @@ def flex_attention_forward(
         Q_LEN=q_len_rounded,
         KV_LEN=kv_len_rounded,
         device=causal_mask.device,
-        _compile=False,
+        # _compile=False,
     )
 
     mask_mod_fn_padded = precomputed_mask_factory(mask_4d)
@@ -117,7 +117,7 @@ def flex_attention_forward(
         KV_LEN=kv_len_rounded,
         BLOCK_SIZE=block_size,
         device=causal_mask.device,
-        _compile=False,
+        # _compile=False,
     )
 
     #  mask is applied inside the kernel, ideally more efficiently than score_mod.

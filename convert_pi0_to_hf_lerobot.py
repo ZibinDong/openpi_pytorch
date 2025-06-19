@@ -388,7 +388,7 @@ def convert_pi0_checkpoint(
     else:
         raise ValueError()
     
-    # pi0_config.device = "cuda:2"
+    pi0_config.device = "cuda:1"
 
     # gemma_config=gemma_config, paligemma_config=paligemma_config)
     pi0_model = PI0Policy(pi0_config)

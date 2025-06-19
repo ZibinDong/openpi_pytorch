@@ -451,10 +451,7 @@ class PI0FlowMatching(nn.Module):
             fill_kv_cache=False,
         )
         suffix_out = suffix_out[:, -self.config.n_action_steps :]
-        # Original openpi code, upcast attention output
-        suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
-
         losses = F.mse_loss(u_t, v_t, reduction="none")
         return losses
 

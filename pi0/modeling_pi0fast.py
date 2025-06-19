@@ -44,7 +44,8 @@ class PI0FASTPolicy(PreTrainedPolicy):
     def __init__(
         self,
         config: PI0FASTConfig,
-        tokenizer_path: str = "/home/dzb/pretrained/paligemma3b",
+        tokenizer_path: str = "google/paligemma-3b-pt-224",
+        # tokenizer_path: str = "/home/dzb/pretrained/paligemma3b",
     ):
         """
         Args:

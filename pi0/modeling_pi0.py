@@ -31,7 +31,8 @@ class PI0Policy(PreTrainedPolicy):
     def __init__(
         self,
         config: PI0Config,
-        tokenizer_path: str = "/home/dzb/pretrained/paligemma3b",
+        tokenizer_path: str = "google/paligemma-3b-pt-224",
+        # tokenizer_path: str = "/home/dzb/pretrained/paligemma3b",
     ):
         """
         Args:

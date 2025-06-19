@@ -4,6 +4,6 @@
 *.txt
 *.jpg
 lightning_logs/
-
+assets/
 
 __pycache__/

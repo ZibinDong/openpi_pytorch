@@ -67,6 +67,7 @@ class PI0Policy(PreTrainedPolicy):
             "lang_tokens": float32 [*b, l],
             "lang_masks": float32 [*b, l],
         }
+        either provide `prompt` or (`lang_tokens`, `lang_masks`).
         """
         self.eval()
 

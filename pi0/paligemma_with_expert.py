@@ -25,8 +25,7 @@ from transformers import (
 )
 from transformers.models.auto import CONFIG_MAPPING
 
-from .flex_attention import flex_attention_forward
-from .utils import apply_rope, eager_attention_forward, xformer_attention_forward
+from .utils import apply_rope, eager_attention_forward
 
 
 class PaliGemmaWithExpertConfig(PretrainedConfig):
@@ -336,11 +335,13 @@ class PaliGemmaWithExpertModel(PreTrainedModel):
         if self.config.attention_implementation == "fa2":
             raise NotImplementedError("FA2 is not implemented (yet)")
         elif self.config.attention_implementation == "flex":
-            attention_interface = flex_attention_forward
+            # attention_interface = flex_attention_forward
+            raise NotImplementedError("Flex attention is not implemented (yet)")
         elif self.config.attention_implementation == "eager":
             attention_interface = eager_attention_forward
         elif self.config.attention_implementation == "xformer":
-            attention_interface = xformer_attention_forward
+            # attention_interface = xformer_attention_forward
+            raise NotImplementedError("Xformer attention is not implemented (yet)")
         else:
             raise ValueError(
                 f"Invalid attention implementation: {self.config.attention_implementation}. "

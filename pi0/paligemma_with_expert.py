@@ -151,7 +151,8 @@ class PaliGemmaWithExpertModel(PreTrainedModel):
         )
         self.gemma_expert = GemmaForCausalLM(config=config.gemma_expert_config)
         # Remove unused embed_tokens
-        self.gemma_expert.model.embed_tokens = None
+        # self.gemma_expert.model.embed_tokens = 
+        del self.gemma_expert.model.embed_tokens
 
         self.attention_interface = self.get_attention_interface()
 
@@ -244,6 +245,26 @@ class PaliGemmaWithExpertModel(PreTrainedModel):
         use_cache: Optional[bool] = None,
         fill_kv_cache: Optional[bool] = None,
     ):
+        """
+        Args:
+            attention_mask (Optional[torch.Tensor], optional): 
+                Attention mask with shape (b, seq_len, seq_len). Defaults to None.
+            position_ids (Optional[torch.LongTensor], optional): 
+                Position indices for applying RoPE. Defaults to None.
+            past_key_values (Optional[Union[List[torch.FloatTensor], Cache]], optional):
+                Optional kv cache. Defaults to None.
+            inputs_embeds (List[torch.FloatTensor], optional): 
+                Input embeddings. Defaults to None.
+            use_cache (Optional[bool], optional): 
+                Whether to use kv cache. Defaults to None.
+            fill_kv_cache (Optional[bool], optional): 
+                Whether to return kv tensors in this forward pass as cache. Defaults to None.
+
+        Returns:
+            outputs_embeds (torch.Tensor): Output embeddings.
+            past_key_values (Optional[Union[List[torch.FloatTensor], Cache]]): 
+                Optional kv cache.
+        """
         models = [self.paligemma.language_model.model, self.gemma_expert.model]
 
         # RMSNorm

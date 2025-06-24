@@ -5,5 +5,7 @@
 *.jpg
 lightning_logs/
 assets/
+*.out
+bridgedata.py
 
 __pycache__/

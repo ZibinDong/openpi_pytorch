@@ -35,6 +35,9 @@ class Normalizer:
                     mean = self.norm_stats[key]["mean"]
                     std = self.norm_stats[key]["std"]
                     normalized_value = (value - mean) / (std + 1e-6)
+                elif norm_type == "std":
+                    std = self.norm_stats[key]["std"]
+                    normalized_value = value / (std + 1e-6)
                 elif norm_type == "minmax":
                     min_val = self.norm_stats[key]["min"]
                     max_val = self.norm_stats[key]["max"]
@@ -62,6 +65,9 @@ class Normalizer:
                     mean = self.norm_stats[key]["mean"]
                     std = self.norm_stats[key]["std"]
                     unnormalized_value = value * (std + 1e-6) + mean
+                elif norm_type == "std":
+                    std = self.norm_stats[key]["std"]
+                    unnormalized_value = value * (std + 1e-6)
                 elif norm_type == "minmax":
                     min_val = self.norm_stats[key]["min"]
                     max_val = self.norm_stats[key]["max"]

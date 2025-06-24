@@ -98,3 +98,52 @@ class PolicyServer:
 
     def run(self):
         asyncio.run(self.start_server())
+
+
+class PolicyClient:
+    def __init__(self, server_host='localhost', server_port=12345):
+        self.server_host = server_host
+        self.server_port = server_port
+        self.loop = None
+        self.client = None
+        self._setup_loop()
+    
+    def _setup_loop(self):
+        import threading
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self._run_loop, daemon=True)
+        self.thread.start()
+        import time
+        time.sleep(0.1)
+    
+    def _run_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+    
+    def _run_async(self, coro):
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        return future.result(timeout=30)
+    
+    def connect(self):
+        if self.client is None:
+            self.client = PolicyClient(self.server_host, self.server_port)
+        return self._run_async(self.client.connect())
+    
+    def disconnect(self):
+        if self.client:
+            self._run_async(self.client.disconnect())
+    
+    def get_action(self, obs: Dict[str, Union[np.ndarray, List[str]]]) -> Any:
+        if self.client is None:
+            self.connect()
+        return self._run_async(self.client.get_action_async(obs))
+    
+    def __enter__(self):
+        self.connect()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.disconnect()
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.loop.stop)
+

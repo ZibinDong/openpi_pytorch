@@ -151,8 +151,8 @@ class PaliGemmaWithExpertModel(PreTrainedModel):
         )
         self.gemma_expert = GemmaForCausalLM(config=config.gemma_expert_config)
         # Remove unused embed_tokens
-        # self.gemma_expert.model.embed_tokens = 
-        del self.gemma_expert.model.embed_tokens
+        self.gemma_expert.model.embed_tokens = None
+        # del self.gemma_expert.model.embed_tokens
 
         self.attention_interface = self.get_attention_interface()
 

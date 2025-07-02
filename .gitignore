@@ -7,5 +7,7 @@ lightning_logs/
 assets/
 *.out
 bridgedata.py
+*.yaml
+*.json
 
 __pycache__/

@@ -21,6 +21,7 @@ PATH_TO_JAX_PI_MODEL = (
 # load model
 cprint("Loading PI0 fast model...", "green")
 policy = PI0FASTPolicy.from_pretrained(PATH_TO_PI_MODEL)
+policy.model.action_dim = 7
 
 # load normalization stats
 device = policy.config.device
@@ -41,17 +42,18 @@ action_std = np.array(norm_stats["norm_stats"]["actions"]["std"][:7], dtype=np.f
 cprint("Creating Libero environment...", "green")
 env = gym.make(
     "libero-goal-v0",  # from ["libero-goal-v0", "libero-object-v0", "libero-spatial-v0", "libero-10-v0", "libero-90-v0"],
-    task_id=3,  # task id from 0 to 9
+    task_id=0,  # task id from 0 to 9
     image_size=224,  # image size (height, width)
     camera_names=["agentview", "robot0_eye_in_hand"],  # camera names
     seed=0,  # random seed
+    max_episode_steps=300,
 )
 
 # reset environment
 o = env.reset()
 # important: do some `dummy` steps because the simulator drops object at the beginning
 dummy_action = np.array([0, 0, 0, 0, 0, 0, -1])
-for _ in range(20):
+for _ in range(10):
     o, r, d, i = env.step(dummy_action)
 
 frames = []
@@ -73,19 +75,20 @@ while not d:
         "image": {
             "base_0_rgb": torch.from_numpy(base_0_rgb).to(device)[None],
             "left_wrist_0_rgb": torch.from_numpy(left_wrist_0_rgb).to(device)[None],
-            "right_wrist_0_rgb": torch.from_numpy(np.zeros_like(left_wrist_0_rgb)).to(
-                "cuda:1"
-            )[None],
+            # "right_wrist_0_rgb": torch.from_numpy(np.zeros_like(left_wrist_0_rgb)).to(
+            #     "cuda:1"
+            # )[None],
         },
         "state": torch.from_numpy(state).to(device)[None],
-        "prompt": [env.task_description],
+        "prompt": [env.language],
     }
-    action = policy.select_action(observation)[0, :, :7]
+    # action = policy.select_action(observation)[0, :, :7]
+    action = policy.select_action(observation)[0]
     action = action.cpu().numpy()
     action = action * (action_std + 1e-6) + action_mean
     action[:, :6] += unnorm_state[None, :6]
-    for i in range(10):
-        o, r, d, _ = env.step(action[i, :7])
+    for i in range(5):
+        o, r, d, _ = env.step(action[i])
         frames.append(o["agentview_image"][:, :, ::-1].transpose(1, 2, 0).copy())
         if d:
             break

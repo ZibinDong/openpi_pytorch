@@ -1,13 +1,14 @@
 import lightning as L
 import torch
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.common.datasets.lerobot_dataset import MultiLeRobotDataset
 from lerobot.configs.policies import PreTrainedConfig
 from lightning.pytorch.callbacks import ModelCheckpoint
+from peft import LoraConfig, TaskType, get_peft_model
 from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms.v2 import Resize
 
-from pi0.modeling_pi0 import PI0Policy
+from pi0 import PI0FASTPolicy
 from utils.normalizers import Normalizer
 
 
@@ -26,33 +27,29 @@ def to_device_dtype(d, device, dtype):
 
 
 class PI0SO100Dataset(Dataset):
-    def __init__(
-        self,
-        repo_id="ZibinDong/so100_grab_screwdriver",
-    ):
+    def __init__(self, repo_ids):
         image_transforms = Resize((224, 224))
 
-        # [i / 30 for i in range(50)] represents action chunks in 50 steps at 30 FPS.
+        # [i / 25 for i in range(50)] represents action chunks in 50 steps at 25 FPS.
         # The timestamps are set to 0 for the images and state, as we only use current obs.
         delta_timestamps = {
             "observation.images.base": [0],
             "observation.images.wrist": [0],
             "observation.state": [0],
-            "action": [i / 30 for i in range(50)],
+            "action": [i / 25 for i in range(50)],
         }
-
-        self.dataset = LeRobotDataset(
-            repo_id=repo_id,
+        self.dataset = MultiLeRobotDataset(
+            repo_ids=repo_ids,
             image_transforms=image_transforms,
             delta_timestamps=delta_timestamps,
         )
         self.normalizer = Normalizer(
-            norm_stats=self.dataset.meta.stats,
+            norm_stats=self.dataset.stats,
             norm_type={
                 "observation.images.base": "identity",
                 "observation.images.wrist": "identity",
-                "observation.state": "meanstd",
-                "action": "std",
+                "observation.state": "minmax",
+                "action": "minmax",
             },
         )
 
@@ -61,8 +58,6 @@ class PI0SO100Dataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.dataset[idx]
-        # we use relative action, so we need to subtract the state from the action
-        item["action"] = item["action"] - item["observation.state"]
         normalized_item = self.normalizer.normalize(item)
         base_image = (normalized_item["observation.images.base"] * 255).to(torch.uint8)
         wrist_image = (normalized_item["observation.images.wrist"] * 255).to(
@@ -87,14 +82,25 @@ class LightningTrainingWrapper(L.LightningModule):
 
     def configure_model(self):
         if self.policy is None:
-            self.policy = PI0Policy.from_pretrained(self.ckpt_path, config=self.config)
+            policy = PI0FASTPolicy.from_pretrained(self.ckpt_path, config=self.config)
+            # add lora to pi0_paligemma model
+            model = policy.model.pi0_paligemma
+            peft_config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                task_type=TaskType.CAUSAL_LM,
+                target_modules="all-linear",
+            )
+            policy.model.pi0_paligemma = get_peft_model(model, peft_config)
+            self.policy = policy
 
     def forward(self, batch):
         return self.policy(batch)[0]
 
     def training_step(self, batch, batch_idx):
-        loss = self.policy(batch)[0]
+        loss, loss_dict = self.policy(batch)
         self.log("train_loss", loss, prog_bar=True)
+        self.log("acc", loss_dict["acc"], prog_bar=True)
         return loss
 
     def configure_optimizers(self):
@@ -117,22 +123,24 @@ class LightningTrainingWrapper(L.LightningModule):
         }
 
 
-dataset = PI0SO100Dataset("ZibinDong/so100_grab_screwdriver")
+dataset = PI0SO100Dataset(
+    [f"ZibinDong/so100_play_screwdriver_0{i + 1}" for i in range(6)]
+)
 dataloader = DataLoader(
-    dataset, batch_size=4, shuffle=True, num_workers=4, persistent_workers=True
+    dataset, batch_size=2, shuffle=True, num_workers=2, persistent_workers=True
 )
 
 callback = ModelCheckpoint(
-    dirpath="/mnt/20T/dzb/pi0_so100_checkpoints",  # where you want to save the checkpoints
+    dirpath="/mnt/20T/dzb/pi0fast_so100_checkpoints",  # where you want to save the checkpoints
     filename="{epoch}-{step}",
     save_top_k=-1,  # save all checkpoints
-    every_n_epochs=4,  # save every 4 epochs
+    every_n_epochs=4,  # save all checkpoints
 )
 
 trainer = L.Trainer(
     accelerator="cuda",
     devices=4,
-    strategy="ddp_find_unused_parameters_true",
+    strategy="ddp",
     max_epochs=50,
     enable_progress_bar=True,
     gradient_clip_val=1.0,
@@ -142,13 +150,12 @@ trainer = L.Trainer(
 )
 
 with trainer.init_module():
-    ckpt_path = "/home/dzb/.cache/openpi/openpi-assets/checkpoints/pi0_base_pytorch"
+    ckpt_path = (
+        "/home/dzb/.cache/openpi/openpi-assets/checkpoints/pi0_fast_base_pytorch"
+    )
     config = PreTrainedConfig.from_pretrained(ckpt_path)
-    config.device = "cpu"
-    config.freeze_vision_encoder = True
-    config.train_expert_only = True
-    config.train_state_proj = True
+    config.max_action_dim = 6  # set action dimension to 6
+    config.chunk_size = 50  # set action chunk length to 50
     training_policy = LightningTrainingWrapper(config, ckpt_path)
-
 
 trainer.fit(training_policy, dataloader)

@@ -1,13 +1,13 @@
+import lightning as L
 import numpy as np
-import pytorch_lightning as L
 import torch
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.common.datasets.lerobot_dataset import MultiLeRobotDataset
 from lerobot.configs.policies import PreTrainedConfig
+from peft import LoraConfig, TaskType, get_peft_model
 from termcolor import cprint
-from torch.utils.data import Dataset
 from torchvision.transforms.v2 import Resize
 
-from pi0.modeling_pi0 import PI0Policy
+from pi0 import PI0FASTPolicy
 from utils.normalizers import Normalizer
 from utils.server import PolicyServer
 
@@ -36,14 +36,25 @@ class LightningTrainingWrapper(L.LightningModule):
 
     def configure_model(self):
         if self.policy is None:
-            self.policy = PI0Policy.from_pretrained(self.ckpt_path, config=self.config)
+            policy = PI0FASTPolicy.from_pretrained(self.ckpt_path, config=self.config)
+            # add lora to pi0_paligemma model
+            model = policy.model.pi0_paligemma
+            peft_config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                task_type=TaskType.CAUSAL_LM,
+                target_modules="all-linear",
+            )
+            policy.model.pi0_paligemma = get_peft_model(model, peft_config)
+            self.policy = policy
 
     def forward(self, batch):
         return self.policy(batch)[0]
 
     def training_step(self, batch, batch_idx):
-        loss = self.policy(batch)[0]
+        loss, loss_dict = self.policy(batch)
         self.log("train_loss", loss, prog_bar=True)
+        self.log("acc", loss_dict["acc"], prog_bar=True)
         return loss
 
 
@@ -51,8 +62,8 @@ class SO100Policy:
     def __init__(
         self,
         ckpt_path: str,
-        pi0_ckpt_path: str,
-        repo_id: str = None,
+        pi0fast_ckpt_path: str,
+        repo_ids: list[str] = None,
         device: str = "cuda:0",
         dtype: torch.dtype = torch.bfloat16,
     ):
@@ -61,25 +72,29 @@ class SO100Policy:
 
         # load policy
         cprint("Loading SO100 Policy...", "yellow")
-        config = PreTrainedConfig.from_pretrained(pi0_ckpt_path)
-        training_policy = LightningTrainingWrapper(config, pi0_ckpt_path)
+        config = PreTrainedConfig.from_pretrained(pi0fast_ckpt_path)
+        config.max_action_dim = 6  # set action dimension to 6
+        config.chunk_size = 50  # set action chunk length to 50
+        training_policy = LightningTrainingWrapper(config, pi0fast_ckpt_path)
+        training_policy.configure_model()
         training_policy.load_state_dict(
-            torch.load(ckpt_path, map_location="cpu")["state_dict"]
+            torch.load(ckpt_path, map_location=device)["state_dict"]
         )
-        self.policy = policy.to(device=device, dtype=dtype).eval()
+        self.policy = training_policy.policy.to(device=device, dtype=dtype).eval()
         cprint("SO100 Policy loaded successfully!", "green")
 
         cprint("Prepareing norm stats...", "yellow")
-        dataset = LeRobotDataset(repo_id=repo_id)
+        dataset = MultiLeRobotDataset(repo_ids)
         self.normalizer = Normalizer(
-            norm_stats=dataset.meta.stats,
+            norm_stats=dataset.stats,
             norm_type={
                 "observation.images.base": "identity",
                 "observation.images.wrist": "identity",
-                "observation.state": "meanstd",
-                "action": "std",
+                "observation.state": "minmax",
+                "action": "minmax",
             },
         )
+        print(self.normalizer.norm_stats)
         cprint("Norm stats prepared successfully!", "green")
 
         self.resize = Resize((224, 224))
@@ -131,13 +146,7 @@ class SO100Policy:
         )
         action = action[:, :, :6]
         action = action.float().cpu().numpy()
-        state = state.float().cpu().numpy()
-        state_action = self.normalizer.unnormalize(
-            {"observation.state": state, "action": action}
-        )
-        state = state_action["observation.state"]
-        action = state_action["action"]
-        action = action + state
+        action = self.normalizer.unnormalize({"action": action})["action"]
         return action
 
     def __call__(self, obs: np.ndarray):
@@ -146,9 +155,9 @@ class SO100Policy:
 
 if __name__ == "__main__":
     policy = SO100Policy(
-        ckpt_path="/mnt/20T/dzb/pi0_so100_checkpoints/epoch=39-step=29760.ckpt",
-        pi0_ckpt_path="/home/dzb/.cache/openpi/openpi-assets/checkpoints/pi0_base_pytorch",
-        repo_ids="ZibinDong/so100_grab_screwdriver",
+        ckpt_path="/mnt/20T/dzb/pi0fast_so100_checkpoints/epoch=39-step=29760.ckpt",
+        pi0fast_ckpt_path="/home/dzb/.cache/openpi/openpi-assets/checkpoints/pi0_fast_base_pytorch",
+        repo_ids=[f"ZibinDong/so100_play_screwdriver_0{i + 1}" for i in range(6)],
         device="cuda:0",
         dtype=torch.bfloat16,
     )

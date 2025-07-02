@@ -23,8 +23,6 @@ IMAGE_KEYS = (
 
 
 class PI0Policy(PreTrainedPolicy):
-    """Wrapper class around PI0FlowMatching model to train and run inference within LeRobot."""
-
     config_class = PI0Config
     name = "torch_pi0"
 
@@ -32,7 +30,6 @@ class PI0Policy(PreTrainedPolicy):
         self,
         config: PI0Config,
         tokenizer_path: str = "google/paligemma-3b-pt-224",
-        # tokenizer_path: str = "/home/dzb/pretrained/paligemma3b",
     ):
         """
         Args:
@@ -535,6 +532,5 @@ class PI0FlowMatching(nn.Module):
         )
         suffix_out = outputs_embeds[1]
         suffix_out = suffix_out[:, -self.config.n_action_steps :]
-        # suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
         return v_t

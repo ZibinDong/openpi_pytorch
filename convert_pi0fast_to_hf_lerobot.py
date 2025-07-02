@@ -388,6 +388,10 @@ def convert_pi0_checkpoint(
         pi0_config = PI0FASTConfig(
             adapt_to_pi_aloha=False,
         )
+    elif "pi0_fast_base" in checkpoint_dir:
+        pi0_config = PI0FASTConfig(
+            adapt_to_pi_aloha=False,
+        )
     else:
         raise ValueError()
 

@@ -290,7 +290,7 @@ def slice_initial_orbax_checkpoint(checkpoint_dir: str):
     params_name = "params"
 
     item = {params_name: metadata[params_name]}
-    device = jax.local_devices()[2]  # Use the first local device
+    device = jax.local_devices()[0]  # Use the first local device
     sharding = SingleDeviceSharding(device)
     restored = checkpointer.restore(
         params_path,

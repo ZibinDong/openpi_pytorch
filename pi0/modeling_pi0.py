@@ -2,8 +2,12 @@ import einops
 import numpy as np
 import torch
 import torch.nn.functional as F
+# In pi0_jax envrionment
 from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.common.policies.pretrained import PreTrainedPolicy
+# In pi0_torch envrionment
+# from lerobot.policies.pi0.configuration_pi0 import PI0Config
+# from lerobot.policies.pretrained import PreTrainedPolicy
 from torch import Tensor, nn
 from transformers import AutoTokenizer
 

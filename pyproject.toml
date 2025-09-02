@@ -1,0 +1,87 @@
+[project]
+name = "openpi-pytorch-env"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch==2.2.2",
+    "torchvision==0.17.2", 
+    "torchaudio==2.2.2",
+    "numpy<2.0",
+    # "einops==0.4.1",
+    "mujoco_py>=2.0",
+    "gym>=0.13,<0.24",
+    "dm_control>=1.0.3,<=1.0.20",
+    "cython==3.0.0",
+    "numba<0.60.0",
+    "matplotlib==3.5.3",
+    "six",
+    "hydra-core==1.2.0",
+    "zarr<2.17",
+    # "wandb==0.13.1",
+    "dill",
+    "av",
+    "pygame",
+    "pymunk",
+    "shapely<2.0.0",
+    "scikit-image<0.23.0",
+    "opencv-python==4.6.0.66",
+    "imagecodecs",
+    "mujoco<=3.1.6",
+    "easydict==1.9",
+    "transformers==4.48.0",
+    "robomimic==0.2.0",
+    "thop==0.1.1-2209072238",
+    "robosuite==1.4.0",
+    "bddl==1.0.1",
+    "future==0.18.2",
+    "cloudpickle==2.1.0",
+    # Delete the [gym==0.25.2] requirements in "LIBERO"
+
+    "datasets>=2.19.0,<=3.6.0", # TODO: Bumb dependency
+    "diffusers>=0.27.2",
+    "huggingface-hub[hf-transfer,cli]>=0.34.2",
+
+    # Core dependencies
+    "cmake>=3.29.0.1",
+    "einops>=0.8.0",
+    "opencv-python-headless>=4.9.0",
+    "av>=14.2.0",
+    "jsonlines>=4.0.0",
+    "packaging>=24.2",
+    "pynput>=1.7.7",
+    "pyserial>=3.5",
+    "wandb>=0.20.0",
+
+    # "torch>=2.2.1,<2.8.0", # TODO: Bumb dependency
+    # "torchcodec>=0.2.1,<0.6.0; sys_platform != 'win32' and (sys_platform != 'linux' or (platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'armv7l')) and (sys_platform != 'darwin' or platform_machine != 'x86_64')", # TODO: Bumb dependency
+    # "torchvision>=0.21.0,<0.23.0", # TODO: Bumb dependency
+    "torchcodec",
+
+    "draccus==0.10.0", # TODO: Remove ==
+    "gymnasium>=0.29.1,<1.0.0", # TODO: Bumb dependency
+    "rerun-sdk>=0.21.0,<0.23.0", # TODO: Bumb dependency
+
+    # Support dependencies
+    "deepdiff>=7.0.1,<9.0.0",
+    "flask>=3.0.3,<4.0.0",
+    "imageio[ffmpeg]>=2.34.0,<3.0.0",
+    "termcolor>=2.4.0,<4.0.0",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+# 1. Creating a new environment by Conda/Mamba 
+# 2. Installing `mamba install ffmpeg=7.1.1 uv ipython`
+# 3. Using `uv lock` to solve the environment
+# 4. Using `uv export --format requirements-txt > requirements.txt ` to generate the requirements
+# 5. Using `uv pip install --system -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu121 --index-strategy unsafe-best-match` to install it
